@@ -552,11 +552,11 @@ async function ensureComposer() {
   composerLoading = true;
   try {
     const [ec, rp, ub, sp, op] = await Promise.all([
-      import(JSM + 'postprocessing/EffectComposer.js/+esm'),
-      import(JSM + 'postprocessing/RenderPass.js/+esm'),
-      import(JSM + 'postprocessing/UnrealBloomPass.js/+esm'),
-      import(JSM + 'postprocessing/ShaderPass.js/+esm'),
-      import(JSM + 'postprocessing/OutputPass.js/+esm')
+      import(/* @vite-ignore */ JSM + 'postprocessing/EffectComposer.js/+esm'),
+      import(/* @vite-ignore */ JSM + 'postprocessing/RenderPass.js/+esm'),
+      import(/* @vite-ignore */ JSM + 'postprocessing/UnrealBloomPass.js/+esm'),
+      import(/* @vite-ignore */ JSM + 'postprocessing/ShaderPass.js/+esm'),
+      import(/* @vite-ignore */ JSM + 'postprocessing/OutputPass.js/+esm')
     ]);
     composer = new ec.EffectComposer(renderer);
     composer.setSize(viewWidth(), innerHeight);
@@ -977,7 +977,7 @@ async function repackGltfToGlb(entry, byName) {
 }
 /* Last resort if the repack cannot cope with the file. */
 async function templateAsGlb() {
-  const mod = await import(JSM + 'exporters/GLTFExporter.js/+esm');
+  const mod = await import(/* @vite-ignore */ JSM + 'exporters/GLTFExporter.js/+esm');
   const buf = await new Promise((resolve, reject) => {
     new mod.GLTFExporter().parse(template, resolve, reject,
       { binary: true, animations: clips, embedImages: true });
@@ -1031,10 +1031,10 @@ async function environmentFileToDataUrl(file, maxSize) {
     // three renamed this loader; try the current name first, then the old one
     let loader = null;
     try {
-      const mod = await import(JSM + 'loaders/HDRLoader.js/+esm');
+      const mod = await import(/* @vite-ignore */ JSM + 'loaders/HDRLoader.js/+esm');
       loader = new mod.HDRLoader();
     } catch (e) {
-      const mod = await import(JSM + 'loaders/RGBELoader.js/+esm');
+      const mod = await import(/* @vite-ignore */ JSM + 'loaders/RGBELoader.js/+esm');
       loader = new mod.RGBELoader();
     }
     if (loader.setDataType) loader.setDataType(THREE.FloatType);
@@ -2995,15 +2995,15 @@ async function attachDecoders(target) {
   if (!decoderCache) {
     decoderCache = {};
     try {
-      const m = await import(JSM + 'loaders/DRACOLoader.js/+esm');
+      const m = await import(/* @vite-ignore */ JSM + 'loaders/DRACOLoader.js/+esm');
       decoderCache.draco = new m.DRACOLoader().setDecoderPath(JSM + 'libs/draco/gltf/');
     } catch (err) { console.warn('Draco decoder unavailable.', err); }
     try {
-      const m = await import(JSM + 'libs/meshopt_decoder.module.js/+esm');
+      const m = await import(/* @vite-ignore */ JSM + 'libs/meshopt_decoder.module.js/+esm');
       decoderCache.meshopt = m.MeshoptDecoder || m.default;
     } catch (err) { console.warn('Meshopt decoder unavailable.', err); }
     try {
-      const m = await import(JSM + 'loaders/KTX2Loader.js/+esm');
+      const m = await import(/* @vite-ignore */ JSM + 'loaders/KTX2Loader.js/+esm');
       decoderCache.ktx2 = new m.KTX2Loader().setTranscoderPath(JSM + 'libs/basis/').detectSupport(renderer);
     } catch (err) { console.warn('KTX2 decoder unavailable.', err); }
   }
