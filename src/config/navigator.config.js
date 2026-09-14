@@ -9,15 +9,27 @@ export const CONFIG = {
   /* the 3D file */
   model: {
     url: "/models/DPR_CITY.glb",   // sits next to this HTML file
-    terrainNode: "TERRAIN"   // ground plane, shown at every level
+    terrainNode: "TERRAIN_MAIN"   // ground plane, shown at every level
   },
 
   /* the ground plane */
   ground: {
     visible: true,   // false hides the very large ground plane so the backdrop shows
-    useModelMaterial: false,   // true uses the material assigned in Blender
+    useModelMaterial: true,   // keep Blender materials where they exist
     color: "#A8C24E",
     roughness: 0.96
+  },
+
+  /* fallback for Blender objects that have no assigned material */
+  noMaterial: {
+    color: "#C7D0D7",
+    roughness: 0.92,
+    metalness: 0
+  },
+
+  /* texture sampling */
+  render: {
+    anisotropy: 0   // 0 asks the graphics card for its maximum
   },
 
   /* how the closed volume is drawn at level 1 */
@@ -49,12 +61,12 @@ export const CONFIG = {
 
   /* level 1: the isometric city view */
   cityView: {
-    fit: "auto",   // 'auto' or 'solutions' or 'building' frame automatically, 'manual' uses the values below
-    azimuth: -34,   // degrees around the vertical axis
+    fit: "manual",   // values authored for the new city model
+    azimuth: 56,   // degrees around the vertical axis
     elevation: 38,   // degrees above the horizon
-    padding: 3.55,   // used by the automatic framing modes
-    frustum: 320,   // used by manual framing. Smaller number = closer
-    target: [0, 150, 0]   // the point the camera looks at
+    padding: 1.35,   // used by the automatic framing modes
+    frustum: 123,   // used by manual framing. Smaller number = closer
+    target: [-7.1, 7.2, -13.6]   // the point the camera looks at
   },
 
   /* level 2: how far the user may orbit */
@@ -71,17 +83,44 @@ export const CONFIG = {
     toCity: 1600,
     toBuilding: 2100,
     toSolution: 1100,
-    fadeStart: 0.6,   // when the dissolve begins, as a fraction of the move
-    fadeEnd: 1,   // when the dissolve finishes
-    fadeSharpness: 1.3,   // higher spends less time half way between the two shapes
-    fadeMode: "inFirst",   // cross | outFirst | inFirst | cut
-    camEase: "inout"   // inout | out | in | linear
+    fadeStart: 0.72,
+    fadeEnd: 0.94,
+    fadeSharpness: 2.4,
+    fadeMode: "swap",   // swap | cross | outFirst | inFirst | cut
+    camEase: "inout",
+    swapAt: 0.5
+  },
+
+  markers: {
+    declutter: true,
+    minGap: 34,
+    maxShift: 30
+  },
+
+  naming: {
+    auto: true,
+    heroLod: "auto",
+    focusGeoOnSolution: true,
+    adoptPins: true,
+    reportUnknown: true
+  },
+
+  surroundings: {
+    mode: "fade",
+    opacity: 0,
+    buildings: true,
+    extras: true,
+    terrain: false,
+    from: 0.05,
+    to: 0.55
   },
 
   /* level 3: the camera move when a solution is picked */
   solutionView: {
     enabled: true,
-    frustum: 34,   // used by manual framing. Smaller number = closer
+    fit: "part",
+    padding: 3.2,
+    frustum: 2.4,
     keepAngle: true,   // keep the angle the user is already looking from
     azimuth: null,   // degrees around the vertical axis
     elevation: null   // degrees above the horizon
@@ -161,22 +200,27 @@ export const CONFIG = {
       rotation: 0,
       scale: 1,
       nodes: {
-        city: "LOD_04",
-        detail: "LOD_00"
+        city: "_HERO_HP_ONEBLOORWEST_ROOT",
+        detail: "_HERO_LP_ONEBLOORWEST_ROOT"
       },
-      markerHeight: 0.6,   // 0 is the base, 1 is the roof
+      markerHeight: 0.55,
+      contextParts: ["Side_building", "Crystal_long", "Crystal_plant"],
+      detailFocus: {
+        node: "",
+        contextOpacity: 0.04
+      },
       view: {
-        fit: "solutions",   // 'auto' or 'solutions' or 'building' frame automatically, 'manual' uses the values below
+        fit: "building",
         azimuth: -50,   // degrees around the vertical axis
         elevation: 22,   // degrees above the horizon
-        padding: 9,   // used by the automatic framing modes
+        padding: 1.45,
         frustum: 120,   // used by manual framing. Smaller number = closer
         target: [13, 12, -25]   // the point the camera looks at
       },
       solutions: [
         {
           number: 1,
-          node: "Solution_01",   // empty from Blender. Leave position null to follow it
+          node: "PIN_HANGER_COLUMN_01",
           position: null,
           label: "Corner hangers",
           title: "Corner Hanger Assembly",
@@ -200,39 +244,13 @@ export const CONFIG = {
           animation: {
             clip: "",   // animation clip name from Blender. Empty uses the placeholder
             label: "View the load path"
-          }
+          },
+          solutionId: "hanger_column",
+          anchorIndex: "01"
         },
         {
           number: 2,
-          node: "Solution_02",   // empty from Blender. Leave position null to follow it
-          position: null,
-          label: "RBS connection",
-          title: "RBS Beam-to-Column Connection",
-          description: "See how the structural element behaves during an earthquake, or open the solution to inspect it in 3D.",
-          body: [
-            "In a reduced beam section the flanges of the beam are trimmed a short distance away from the column face. During a strong earthquake the beam yields inside that reduced zone instead of at the weld, so the plastic hinge forms where it can be tolerated.",
-            "Keeping the hinge away from the column face protects the connection itself, which means the frame can absorb a large amount of energy while the primary load path stays intact."
-          ],
-          specs: [
-            ["Reference", "PR0602"],
-            ["Family", "Moment connections"],
-            ["Role", "Controlled yielding in seismic frames"]
-          ],
-          sketchfab: "https://sketchfab.com/3d-models/pr0602-rbs-beam-to-column-6bdb10adbec04453b93f380ae3a036f0",
-          provider: {
-            name: "constructsteel",
-            note: "Replace with the company that supplies this solution.",
-            url: "https://constructsteel.org/"   // sits next to this HTML file
-          },
-          detailsUrl: "https://constructsteel.org/steel-solutions/disaster-solution/prevention-solution/earthquake/reduced-beam-sections-rbs/",
-          animation: {
-            clip: "",   // animation clip name from Blender. Empty uses the placeholder
-            label: "View earthquake response"
-          }
-        },
-        {
-          number: 3,
-          node: "Solution_03",   // empty from Blender. Leave position null to follow it
+          node: "PIN_MEGACOLUMN_01",
           position: null,
           label: "Megacolumn",
           title: "Composite Megacolumn",
@@ -256,9 +274,42 @@ export const CONFIG = {
           animation: {
             clip: "",   // animation clip name from Blender. Empty uses the placeholder
             label: "View the load path"
-          }
+          },
+          solutionId: "megacolumn",
+          anchorIndex: "01"
+        },
+        {
+          number: 3,
+          node: "PIN_TOWER_TRANSFER_01",
+          position: null,
+          label: "Tower transfer",
+          title: "Tower Transfer Structure",
+          description: "Placeholder text. This pin is PIN_TOWER_TRANSFER_01 and still needs its own copy and 3D model.",
+          body: [
+            "PIN_TOWER_TRANSFER_01 was added to the model after the first three solutions were written, so this entry has no technical copy yet. Write the description here and point the Sketchfab field at the right model.",
+            "The wording that used to sit on this slot described the PR0602 reduced beam section, which belongs to a different pin. It is kept in the README under Parked content so nothing was lost."
+          ],
+          specs: [
+            ["Reference", ""],
+            ["Family", ""],
+            ["Role", ""]
+          ],
+          sketchfab: "",
+          provider: {
+            name: "constructsteel",
+            note: "Replace with the company that supplies this solution.",
+            url: "https://constructsteel.org/"   // sits next to this HTML file
+          },
+          detailsUrl: "https://constructsteel.org/",
+          animation: {
+            clip: "",   // animation clip name from Blender. Empty uses the placeholder
+            label: "View earthquake response"
+          },
+          solutionId: "tower_transfer",
+          anchorIndex: "01"
         }
-      ]
+      ],
+      assetId: "ONEBLOORWEST"
     }
   ]
 };

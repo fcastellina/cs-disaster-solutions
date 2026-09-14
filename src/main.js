@@ -19,6 +19,7 @@ import { CONFIG } from './config/navigator.config.js';
 import { dom } from './ui/dom.js';
 import { createHazardMap } from './ui/hazard-map.js';
 import { loadCityModel } from './three/model-loader.js';
+import { cleanNodeName, findNodeLoose, hasRenderableNode } from './three/model-nodes.js';
 
 const DEG = Math.PI / 180;
 const CAM_DIST = 1400;
@@ -59,6 +60,7 @@ const {
 
 /* ---- state ---------------------------------------------------------------- */
 let template = null, clips = [], terrain = null;
+let importedObjects = [];
 let buildings = [];                 // runtime objects, one per CONFIG.buildings entry
 let level = 'city';                 // 'city' | 'building'
 let activeBuilding = null;
@@ -398,22 +400,76 @@ function eachMaterial(obj, fn) {
     (Array.isArray(o.material) ? o.material : [o.material]).forEach(fn);
   });
 }
+function isDefaultMaterial(material) {
+  return Boolean(
+    material && !material.name && !material.map &&
+    material.metalness === 1 && material.roughness === 1
+  );
+}
+function neutralMaterial() {
+  const config = CONFIG.noMaterial || {};
+  const material = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(config.color || '#C7D0D7'),
+    roughness: config.roughness == null ? 0.92 : config.roughness,
+    metalness: config.metalness == null ? 0 : config.metalness
+  });
+  rememberDisplayMaterial(material);
+  return material;
+}
+let maxAnisotropy = 0;
+function applyAnisotropy(material) {
+  if (!material) return;
+  if (!maxAnisotropy) maxAnisotropy = renderer.capabilities.getMaxAnisotropy();
+  const requested = (CONFIG.render && CONFIG.render.anisotropy) || maxAnisotropy;
+  const value = Math.max(1, Math.min(maxAnisotropy, requested));
+  ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap', 'alphaMap', 'bumpMap']
+    .forEach(key => {
+      const texture = material[key];
+      if (texture && texture.anisotropy !== value) {
+        texture.anisotropy = value;
+        texture.needsUpdate = true;
+      }
+    });
+}
+function rememberDisplayMaterial(material) {
+  material.userData._t0 = Boolean(material.transparent);
+  material.userData._displayOpacity = material.opacity;
+  material.userData._displayTransparent = Boolean(material.transparent);
+  material.userData._displayDepthWrite = material.depthWrite;
+}
 function prepareBranch(obj, opts) {
   const forceOpaque = opts && opts.forceOpaque;
   obj.traverse(o => {
     if (o.isMesh || o.isInstancedMesh) { o.castShadow = true; o.receiveShadow = true; }
     if (!o.material) return;
     const map = m => {
+      if (isDefaultMaterial(m)) return neutralMaterial();
       const n = m.clone();
       if (forceOpaque) {
         n.transparent = false; n.opacity = 1; n.depthWrite = true;
         n.side = THREE.FrontSide; n.alphaTest = 0; n.alphaMap = null;
       }
-      n.userData._t0 = n.transparent;
+      rememberDisplayMaterial(n);
+      applyAnisotropy(n);
       return n;
     };
     o.material = Array.isArray(o.material) ? o.material.map(map) : map(o.material);
   });
+}
+function groundMaterialFor(material) {
+  if (CONFIG.ground.useModelMaterial !== false && material && !isDefaultMaterial(material)) {
+    const clone = material.clone();
+    rememberDisplayMaterial(clone);
+    applyAnisotropy(clone);
+    return clone;
+  }
+  const ground = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(CONFIG.ground.color),
+    roughness: CONFIG.ground.roughness,
+    metalness: 0
+  });
+  rememberDisplayMaterial(ground);
+  return ground;
 }
 /* The exported ground plane carries no material, so glTF hands us the default
    fully metallic one. Give it something that reads as ground. */
@@ -422,26 +478,127 @@ function prepareGround(obj) {
   obj.traverse(o => {
     if (!o.isMesh && !o.isInstancedMesh) return;
     o.castShadow = false; o.receiveShadow = true;
-    if (CONFIG.ground.useModelMaterial) {
-      const m = Array.isArray(o.material) ? o.material[0] : o.material;
-      if (m) { m.userData._t0 = m.transparent; }
-      return;
-    }
-    o.material = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(CONFIG.ground.color),
-      roughness: CONFIG.ground.roughness, metalness: 0
-    });
-    o.material.userData._t0 = false;
+    o.material = Array.isArray(o.material)
+      ? o.material.map(groundMaterialFor)
+      : groundMaterialFor(o.material);
   });
 }
 function setOpacity(obj, v, noDepth) {
+  const factor = THREE.MathUtils.clamp(v, 0, 1);
   eachMaterial(obj, m => {
-    m.opacity = v;
-    m.transparent = v < 0.999 ? true : !!m.userData._t0;
-    m.depthWrite = noDepth ? false : v > 0.25;
+    const baseOpacity = m.userData._displayOpacity == null ? m.opacity : m.userData._displayOpacity;
+    const baseTransparent = m.userData._displayTransparent == null ? Boolean(m.userData._t0) : m.userData._displayTransparent;
+    const baseDepthWrite = m.userData._displayDepthWrite == null ? true : m.userData._displayDepthWrite;
+    const opacity = baseOpacity * factor;
+    m.opacity = opacity;
+    m.transparent = factor < 0.999 || opacity < 0.999 ? true : baseTransparent;
+    m.depthWrite = noDepth || factor < 0.999 ? false : baseDepthWrite;
+    m.needsUpdate = true;
   });
 }
 function worldBox(obj) { obj.updateWorldMatrix(true, true); return new THREE.Box3().setFromObject(obj); }
+
+function contextPartObjects(building) {
+  if (!building || !building.detailObj) return [];
+  return (building.cfg.contextParts || [])
+    .map(name => findNodeLoose(building.detailObj, name))
+    .filter(Boolean);
+}
+function surroundingsConfig() {
+  const config = CONFIG.surroundings || {};
+  return {
+    mode: config.mode === 'keep' ? 'keep' : 'fade',
+    opacity: THREE.MathUtils.clamp(config.opacity == null ? 0 : config.opacity, 0, 1),
+    buildings: config.buildings !== false,
+    extras: config.extras !== false,
+    terrain: config.terrain === true,
+    from: THREE.MathUtils.clamp(config.from == null ? 0.05 : config.from, 0, 0.95),
+    to: THREE.MathUtils.clamp(config.to == null ? 0.55 : config.to, 0.05, 1)
+  };
+}
+function contextObjects(activeBuilding, options = {}) {
+  const config = surroundingsConfig();
+  const objects = [];
+  if (config.buildings) {
+    buildings.forEach(building => {
+      if (building !== activeBuilding) objects.push(building.cityObj);
+    });
+  }
+  if (config.extras) objects.push(...importedObjects, ...propObjects);
+  if (config.terrain && terrain) objects.push(terrain);
+  if (options.inside !== false) objects.push(...contextPartObjects(activeBuilding));
+  return objects;
+}
+function setContextAlpha(objects, alpha) {
+  const value = THREE.MathUtils.clamp(alpha, 0, 1);
+  objects.forEach(object => {
+    setOpacity(object, value, value < 0.999);
+    object.visible = value > 0.003;
+  });
+}
+function clearSurroundings(except = null) {
+  const objects = [];
+  buildings.forEach(building => {
+    objects.push(building.cityObj);
+    objects.push(...contextPartObjects(building));
+  });
+  objects.push(...importedObjects, ...propObjects);
+  if (terrain) objects.push(terrain);
+  objects.forEach(object => {
+    setOpacity(object, 1);
+    if (object !== except) object.visible = true;
+  });
+  if (terrain) terrain.visible = CONFIG.ground.visible !== false;
+}
+function refreshSurroundings() {
+  if (level !== 'building' || !activeBuilding) {
+    clearSurroundings();
+    return;
+  }
+  const config = surroundingsConfig();
+  clearSurroundings(activeBuilding.cityObj);
+  activeBuilding.cityObj.visible = false;
+  if (config.mode === 'fade') setContextAlpha(contextObjects(activeBuilding), config.opacity);
+}
+function resetBuildingFocus(building) {
+  if (building && building.detailObj) setOpacity(building.detailObj, 1, false);
+}
+function applyBuildingFocus(building) {
+  if (!building || !building.detailObj) return false;
+  resetBuildingFocus(building);
+  const focus = building.cfg.detailFocus || {};
+  const target = focus.node ? findNodeLoose(building.detailObj, focus.node) : null;
+  if (!focus.node) return true;
+  if (!target) return false;
+  const contextOpacity = THREE.MathUtils.clamp(focus.contextOpacity == null ? 0.04 : focus.contextOpacity, 0, 0.25);
+  setOpacity(building.detailObj, contextOpacity, true);
+  setOpacity(target, 1, false);
+  return true;
+}
+function solutionGeometry(building, solution) {
+  if (!building || !solution || !building.detailObj || CONFIG.naming?.focusGeoOnSolution === false) return null;
+  const expected = `GEO_${cleanNodeName(solution.solutionId)}`;
+  if (expected === 'GEO_') return null;
+  return findNodeLoose(building.detailObj, expected);
+}
+function applySolutionGeometry(building, solution) {
+  const geometry = solutionGeometry(building, solution);
+  if (!geometry) {
+    applyBuildingFocus(building);
+    return;
+  }
+  const focus = building.cfg.detailFocus || {};
+  const contextOpacity = THREE.MathUtils.clamp(focus.contextOpacity == null ? 0.04 : focus.contextOpacity, 0, 0.25);
+  resetBuildingFocus(building);
+  setOpacity(building.detailObj, contextOpacity, true);
+  setOpacity(geometry, 1, false);
+  refreshSurroundings();
+}
+function clearSolutionGeometry(building) {
+  if (!building) return;
+  applyBuildingFocus(building);
+  refreshSurroundings();
+}
 
 /* ---- build the city ------------------------------------------------------- */
 function buildCity() {
@@ -452,16 +609,16 @@ function buildCity() {
     group.name = 'building_' + cfg.id;
     // If the named nodes are not in the model, show the whole thing rather
     // than nothing, so a freshly loaded model is visible while it is mapped.
-    let srcCity = template.getObjectByName(cfg.nodes.city);
-    let srcDetail = template.getObjectByName(cfg.nodes.detail);
+    let srcCity = findNodeLoose(template, cfg.nodes.city);
+    let srcDetail = findNodeLoose(template, cfg.nodes.detail);
     if (!srcCity && !srcDetail) { srcCity = template; srcDetail = template; }
     else if (!srcCity) srcCity = srcDetail;
     else if (!srcDetail) srcDetail = srcCity;
     const cityObj = srcCity.clone(true), detailObj = srcDetail.clone(true);
     prepareBranch(cityObj, { forceOpaque: CONFIG.cityShape.forceOpaque });
     prepareBranch(detailObj);
-    applyNodeTransform(cityObj, cfg.nodes.city);
-    applyNodeTransform(detailObj, cfg.nodes.detail);
+    applyNodeTransformsInTree(cityObj);
+    applyNodeTransformsInTree(detailObj);
     detailObj.visible = false;
     group.add(cityObj, detailObj);
     scene.add(group);
@@ -471,14 +628,16 @@ function buildCity() {
       mixer: new THREE.AnimationMixer(group), action: null,
       markerEl: null, solutionEls: new Map(), baseX: 0
     };
+    attachDetachedPins(b, srcDetail);
     applyPlacement(b);
     b.cityBox = worldBox(cityObj);
     b.detailBox = worldBox(detailObj);
     buildings.push(b);
   });
+  buildImportedObjects();
+  buildProps();
   indexMaterials();
   applyMaterials();
-  buildProps();
   aimSun();
 }
 function applyPlacement(b) {
@@ -515,7 +674,12 @@ function aimSun() {
 let materialIndex = new Map();
 function indexMaterials() {
   materialIndex = new Map();
-  buildings.forEach(b => [b.cityObj, b.detailObj].forEach(root => {
+  const roots = [];
+  buildings.forEach(b => roots.push(b.cityObj, b.detailObj));
+  importedObjects.forEach(object => roots.push(object));
+  propObjects.forEach(object => roots.push(object));
+  if (terrain) roots.push(terrain);
+  roots.forEach(root => {
     root.traverse(o => {
       if (!o.material) return;
       (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => {
@@ -524,7 +688,7 @@ function indexMaterials() {
         materialIndex.get(n).push(m);
       });
     });
-  }));
+  });
 }
 function applyMaterials() {
   markDirty(500);
@@ -555,7 +719,8 @@ function applyMaterials() {
         m.normalScale.setScalar(over.normalScale != null ? over.normalScale : (base.normalScale == null ? 1 : base.normalScale));
       if (m.aoMapIntensity !== undefined)
         m.aoMapIntensity = over.aoMapIntensity != null ? over.aoMapIntensity : (base.aoMapIntensity == null ? 1 : base.aoMapIntensity);
-      m.userData._t0 = m.transparent;
+      rememberDisplayMaterial(m);
+      applyAnisotropy(m);
       TEX_SLOTS.forEach(slot => {
         const url = over[slot] || null;
         if (m.userData['_url_' + slot] === url) return;
@@ -607,17 +772,79 @@ function applyNodeTransform(obj, name) {
   }
   obj.updateMatrixWorld(true);
 }
+function applyNodeTransformsInTree(root) {
+  if (!root) return;
+  root.traverse(object => {
+    if (object.name) applyNodeTransform(object, object.name);
+  });
+  root.updateMatrixWorld(true);
+}
+function attachDetachedPins(building, sourceDetail) {
+  if (!template || !building.detailObj || !sourceDetail) return;
+  sourceDetail.updateWorldMatrix(true, false);
+
+  building.cfg.solutions.forEach(solution => {
+    if (!solution.node || findNodeLoose(building.detailObj, solution.node)) return;
+    const sourcePin = findNodeLoose(template, solution.node);
+    if (!sourcePin) return;
+
+    sourcePin.updateWorldMatrix(true, false);
+    const world = sourcePin.getWorldPosition(new THREE.Vector3());
+    const anchor = new THREE.Object3D();
+    anchor.name = solution.node;
+    anchor.position.copy(sourceDetail.worldToLocal(world.clone()));
+    anchor.visible = false;
+    building.detailObj.add(anchor);
+  });
+  building.detailObj.updateMatrixWorld(true);
+}
 /* One place that builds the ground, so every path agrees. */
 function attachTerrain() {
   if (terrain) { scene.remove(terrain); terrain = null; }
   const name = CONFIG.model.terrainNode;
-  const src = (name && template) ? template.getObjectByName(name) : null;
+  const src = (name && template) ? findNodeLoose(template, name) : null;
   if (!src) return;
   terrain = src.clone(true);
   prepareGround(terrain);
-  applyNodeTransform(terrain, name);
+  applyNodeTransformsInTree(terrain);
   scene.add(terrain);
   markDirty(400);
+}
+
+function reservedModelRootNames() {
+  const names = new Set();
+  const add = value => {
+    if (!value) return;
+    names.add(value);
+    names.add(cleanNodeName(value));
+  };
+  CONFIG.buildings.forEach(building => {
+    add(building.nodes && building.nodes.city);
+    add(building.nodes && building.nodes.detail);
+    building.solutions.forEach(solution => add(solution.node));
+  });
+  add(CONFIG.model.terrainNode);
+  (CONFIG.props || []).forEach(prop => add(prop.node));
+  return names;
+}
+function buildImportedObjects() {
+  importedObjects.forEach(object => scene.remove(object));
+  importedObjects = [];
+  if (!template) return;
+
+  const reserved = reservedModelRootNames();
+  template.children.forEach(source => {
+    if (!source.name || !hasRenderableNode(source)) return;
+    if (reserved.has(source.name) || reserved.has(cleanNodeName(source.name))) return;
+
+    const object = source.clone(true);
+    object.userData._sourceNodeName = source.name;
+    prepareBranch(object);
+    applyNodeTransformsInTree(object);
+    scene.add(object);
+    importedObjects.push(object);
+  });
+  markDirty(500);
 }
 
 /* ---- extra objects ------------------------------------------------------
@@ -630,7 +857,7 @@ function buildProps() {
   (CONFIG.props || []).forEach(cfg => {
     let obj = null;
     if (cfg.node && template) {
-      const src = template.getObjectByName(cfg.node);
+      const src = findNodeLoose(template, cfg.node);
       if (src) { obj = src.clone(true); prepareBranch(obj); }
     }
     if (!obj) {
@@ -726,7 +953,7 @@ function solutionNode(b, sol) {
   if (!b.nodeCache) b.nodeCache = new Map();
   const hit = b.nodeCache.get(sol);
   if (hit && hit.name === sol.node) return hit.node;
-  const node = b.detailObj.getObjectByName(sol.node) || null;
+  const node = findNodeLoose(b.detailObj, sol.node);
   b.nodeCache.set(sol, { name: sol.node, node });
   return node;
 }
@@ -750,9 +977,10 @@ function solutionWorld(b, sol, out) {
 /* ---- camera views --------------------------------------------------------- */
 function cityFraming() {
   const v = CONFIG.cityView;
-  if (v.fit === 'auto' && buildings.length) {
+  if (v.fit === 'auto' && (buildings.length || importedObjects.length)) {
     const box = new THREE.Box3();
     buildings.forEach(b => box.union(b.cityBox));
+    importedObjects.forEach(object => box.union(worldBox(object)));
     const c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3());
     return { target: c, frustum: Math.max(Math.max(s.x, s.y, s.z) * (v.padding || 1.25), 40), az: v.azimuth, el: v.elevation };
   }
@@ -831,19 +1059,65 @@ function goCity(animated = true) {
   level = 'city'; activeBuilding = null; focused = false;
   preview.classList.remove('visible'); activeSolution = null;
   stopAnimation();
-  buildings.forEach(b => { b.group.position.x = b.baseX; b.cityObj.visible = true; });
   const to = camStateFor(cityFraming());
 
+  const surroundingObjects = contextObjects(from, { inside: false });
+  const surroundingConfig = surroundingsConfig();
+  const surroundingStart = from && surroundingConfig.mode === 'fade' ? surroundingConfig.opacity : 1;
+  buildings.forEach(building => {
+    building.group.position.x = building.baseX;
+    building.cityObj.visible = building !== from;
+    building.detailObj.visible = building === from;
+    if (building !== from) resetBuildingFocus(building);
+  });
+  if (surroundingStart < 0.999) setContextAlpha(surroundingObjects, surroundingStart);
+  else clearSurroundings(from ? from.cityObj : null);
+
   if (animated && from) {
-    // the same dissolve as going in, run the other way round
-    buildings.forEach(b => { if (b !== from) { b.detailObj.visible = false; setOpacity(b.cityObj, 1); } });
-    from.detailObj.visible = true;
-    setOpacity(from.detailObj, 1, true);
-    setOpacity(from.cityObj, 0, true);
-    startTransition(to, CONFIG.transitions.toCity,
-      { fadeOut: from.detailObj, fadeIn: from.cityObj, onDone: finishCityView });
+    const surroundings = surroundingsConfig();
+    const context = surroundingStart < 0.999
+      ? {
+          objects: surroundingObjects,
+          fromAlpha: surroundingStart,
+          toAlpha: 1,
+          from: 1 - surroundings.to,
+          to: 1 - surroundings.from
+        }
+      : null;
+    const mode = CONFIG.transitions.fadeMode || 'swap';
+    if (mode === 'swap') {
+      resetBuildingFocus(from);
+      applyBuildingFocus(from);
+      setOpacity(from.cityObj, 1);
+      startTransition(to, CONFIG.transitions.toCity, {
+        swap: {
+          from: from.detailObj,
+          to: from.cityObj,
+          at: 1 - (CONFIG.transitions.swapAt == null ? 0.5 : CONFIG.transitions.swapAt)
+        },
+        context,
+        onDone: finishCityView
+      });
+    } else {
+      from.cityObj.visible = true;
+      resetBuildingFocus(from);
+      setOpacity(from.detailObj, 1, true);
+      setOpacity(from.cityObj, 0, true);
+      startTransition(to, CONFIG.transitions.toCity, {
+        fadeOut: from.detailObj,
+        fadeIn: from.cityObj,
+        context,
+        onDone: finishCityView
+      });
+    }
   } else {
-    buildings.forEach(b => { b.detailObj.visible = false; setOpacity(b.cityObj, 1); setOpacity(b.detailObj, 1); });
+    buildings.forEach(b => {
+      b.cityObj.visible = true;
+      b.detailObj.visible = false;
+      resetBuildingFocus(b);
+      setOpacity(b.cityObj, 1);
+    });
+    clearSurroundings();
     if (animated) startTransition(to, CONFIG.transitions.toCity, { onDone: finishCityView });
     else { applyCamState(to); finishCityView(); }
   }
@@ -856,6 +1130,7 @@ function finishCityView() {
     b.cityObj.visible = true; b.detailObj.visible = false;
     setOpacity(b.cityObj, 1); setOpacity(b.detailObj, 1);
   });
+  clearSurroundings();
   cityControls();
   hint.textContent = CONFIG.text.hintCity; hint.style.opacity = '1';
 }
@@ -867,21 +1142,58 @@ function goBuilding(b, animated = true) {
   preview.classList.remove('visible'); activeSolution = null;
   buildings.forEach(o => {
     const on = o === b;
-    o.cityObj.visible = true; o.detailObj.visible = on;
-    if (!on) { setOpacity(o.cityObj, 1); setOpacity(o.detailObj, 1); }
+    o.cityObj.visible = true;
+    o.detailObj.visible = false;
+    resetBuildingFocus(o);
+    setOpacity(o.cityObj, 1);
   });
+  clearSurroundings();
+  applyBuildingFocus(b);
+  const surroundings = surroundingsConfig();
+  const surroundingObjects = contextObjects(b);
+  const context = surroundings.mode === 'fade' && surroundings.opacity < 0.999 && surroundingObjects.length
+    ? {
+        objects: surroundingObjects,
+        fromAlpha: 1,
+        toAlpha: surroundings.opacity,
+        from: surroundings.from,
+        to: surroundings.to
+      }
+    : null;
   const to = camStateFor(buildingFraming(b));
   if (animated) {
-    // the closed volume goes from solid to fully transparent while the open
-    // structure comes the other way, both on the same curve so the total
-    // never dips and the building never appears to vanish
     if (!warmed) prewarm();
-    setOpacity(b.cityObj, 1, true);
-    setOpacity(b.detailObj, 0, true);
-    startTransition(to, CONFIG.transitions.toBuilding,
-      { fadeOut: b.cityObj, fadeIn: b.detailObj, onDone: finishEnterBuilding });
+    const mode = CONFIG.transitions.fadeMode || 'swap';
+    if (mode === 'swap') {
+      startTransition(to, CONFIG.transitions.toBuilding, {
+        swap: {
+          from: b.cityObj,
+          to: b.detailObj,
+          at: CONFIG.transitions.swapAt == null ? 0.5 : CONFIG.transitions.swapAt
+        },
+        context,
+        onDone: finishEnterBuilding
+      });
+    } else {
+      b.detailObj.visible = true;
+      resetBuildingFocus(b);
+      setOpacity(b.cityObj, 1, true);
+      setOpacity(b.detailObj, 0, true);
+      startTransition(to, CONFIG.transitions.toBuilding, {
+        fadeOut: b.cityObj,
+        fadeIn: b.detailObj,
+        context,
+        onDone: finishEnterBuilding
+      });
+    }
   }
-  else { applyCamState(to); finishEnterBuilding(); }
+  else {
+    b.cityObj.visible = false;
+    b.detailObj.visible = true;
+    applyBuildingFocus(b);
+    applyCamState(to);
+    finishEnterBuilding();
+  }
   backBtn.hidden = false;
   hint.textContent = 'Opening building'; hint.style.opacity = '1';
   renderCrumbs();
@@ -891,9 +1203,11 @@ function finishEnterBuilding() {
     const on = o === activeBuilding;
     o.cityObj.visible = !on;
     o.detailObj.visible = on;
-    setOpacity(o.detailObj, 1);
-    setOpacity(o.cityObj, 1);
+    if (on) applyBuildingFocus(o);
+    else resetBuildingFocus(o);
   });
+  refreshSurroundings();
+  if (activeSolution && activeBuilding) applySolutionGeometry(activeBuilding, activeSolution);
   buildingControls();
   hint.textContent = CONFIG.text.hintBuilding; hint.style.opacity = '1';
   say(activeBuilding.cfg.name + '. ' + CONFIG.text.hintBuilding + '.');
@@ -956,9 +1270,47 @@ function markerWorld(b, out) {
   o.y = box.min.y + (box.max.y - box.min.y) * h;
   return o;
 }
+const placedSolutionMarkers = [];
+function declutterMarkers(items) {
+  const config = CONFIG.markers || {};
+  if (config.declutter === false || items.length < 2) return;
+  const gap = config.minGap == null ? 34 : config.minGap;
+  const maxShift = config.maxShift == null ? 30 : config.maxShift;
+  for (let pass = 0; pass < 12; pass += 1) {
+    let moved = false;
+    for (let i = 0; i < items.length; i += 1) {
+      for (let j = i + 1; j < items.length; j += 1) {
+        const first = items[i], second = items[j];
+        let dx = second.x - first.x, dy = second.y - first.y;
+        let distance = Math.hypot(dx, dy);
+        if (distance >= gap) continue;
+        if (distance < 0.001) {
+          dx = (j - i) * 0.6;
+          dy = 1;
+          distance = Math.hypot(dx, dy);
+        }
+        const push = (gap - distance) / (2 * distance);
+        first.x -= dx * push; first.y -= dy * push;
+        second.x += dx * push; second.y += dy * push;
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
+  items.forEach(item => {
+    const dx = item.x - item.originX, dy = item.y - item.originY;
+    const distance = Math.hypot(dx, dy);
+    if (distance > maxShift) {
+      const scale = maxShift / distance;
+      item.x = item.originX + dx * scale;
+      item.y = item.originY + dy * scale;
+    }
+  });
+}
 function updateMarkers() {
   syncCameraMatrices();
   const blocked = (transition && !transition.keepMarkers) || modal.classList.contains('open');
+  placedSolutionMarkers.length = 0;
   buildings.forEach(b => {
     if (b.markerEl) {
       if (level !== 'city' || blocked) b.markerEl.style.display = 'none';
@@ -966,9 +1318,18 @@ function updateMarkers() {
     }
     b.solutionEls.forEach((el, sol) => {
       if (level !== 'building' || b !== activeBuilding || blocked || swayUntil > performance.now()) { el.style.display = 'none'; return; }
-      placeEl(el, solutionWorld(b, sol, _v3));
-      el.classList.toggle('active', activeSolution === sol);
+      const point = project(solutionWorld(b, sol, _v3));
+      if (!point) { el.style.display = 'none'; return; }
+      placedSolutionMarkers.push({ el, sol, x: point.x, y: point.y, originX: point.x, originY: point.y });
     });
+  });
+  declutterMarkers(placedSolutionMarkers);
+  placedSolutionMarkers.forEach(item => {
+    item.el.style.left = item.x + 'px';
+    item.el.style.top = item.y + 'px';
+    item.el.style.transform = 'translate(-50%,-50%)';
+    item.el.style.display = 'flex';
+    item.el.classList.toggle('active', activeSolution === item.sol);
   });
   if (activeSolution && activeBuilding && preview.classList.contains('visible')) placePreview();
 }
@@ -990,7 +1351,7 @@ function focusSolution(b, sol) {
   const now = camAngles();
   const az = own.azimuth != null ? own.azimuth : (sv.keepAngle ? now.az : (sv.azimuth != null ? sv.azimuth : b.cfg.view.azimuth));
   const el = own.elevation != null ? own.elevation : (sv.keepAngle ? now.el : (sv.elevation != null ? sv.elevation : b.cfg.view.elevation));
-  const fr = own.frustum != null ? own.frustum : sv.frustum;
+  const fr = own.frustum != null ? own.frustum : solutionFrustum(b, sol);
   // A solution can carry its own look-at point, so the marker does not have to
   // sit dead centre. Stored in the building's own space, so it survives the
   // building being moved or rotated.
@@ -1002,6 +1363,19 @@ function focusSolution(b, sol) {
   controls.minZoom = 0.12;
   startTransition({ pos: w.clone().add(dirFrom(az, el).multiplyScalar(CAM_DIST)), target: w.clone(), frustum: fr, zoom: 1 },
     CONFIG.transitions.toSolution, { keepMarkers: true, onDone: buildingControls });
+}
+function solutionFrustum(building, solution) {
+  const config = CONFIG.solutionView;
+  if (config.fit === 'manual') return config.frustum;
+  const padding = config.padding == null ? 3.2 : config.padding;
+  const geometry = solutionGeometry(building, solution) || solutionNode(building, solution);
+  if (geometry && hasRenderableNode(geometry)) {
+    const size = worldBox(geometry).getSize(new THREE.Vector3());
+    const extent = Math.max(size.x, size.y, size.z);
+    if (extent > 0.0001) return Math.max(extent * padding, 0.05);
+  }
+  const buildingSize = building.detailBox.getSize(new THREE.Vector3());
+  return Math.max(Math.max(buildingSize.x, buildingSize.y, buildingSize.z) * 0.14, 0.05);
 }
 function unfocusSolution() {
   if (!focused || !activeBuilding) return;
@@ -1024,6 +1398,7 @@ function selectSolution(b, sol) {
   previewNote.textContent = (!clip && canPlaceholder) ? CONFIG.animation.placeholderNote : '';
   preview.classList.add('visible');
   hint.style.opacity = '0';
+  applySolutionGeometry(b, sol);
   focusSolution(b, sol);
   placePreview();
   renderCrumbs();
@@ -1041,9 +1416,11 @@ function placePreview() {
   preview.style.left = x + 'px'; preview.style.top = y + 'px';
 }
 function hidePreview() {
+  const building = activeBuilding;
   preview.classList.remove('visible'); activeSolution = null;
   if (level === 'building') {
     hint.textContent = CONFIG.text.hintBuilding; hint.style.opacity = '1';
+    clearSolutionGeometry(building);
     unfocusSolution();
   }
   renderCrumbs();
@@ -1247,6 +1624,12 @@ function frame(now) {
     frustum = THREE.MathUtils.lerp(a.frustum, b.frustum, e);
     camera.zoom = THREE.MathUtils.lerp(a.zoom, b.zoom, e);
     setFrustum(frustum);
+    if (transition.swap && !transition.swap.done &&
+        t >= THREE.MathUtils.clamp(transition.swap.at == null ? 0.5 : transition.swap.at, 0.05, 0.95)) {
+      if (transition.swap.from) transition.swap.from.visible = false;
+      if (transition.swap.to) transition.swap.to.visible = true;
+      transition.swap.done = true;
+    }
     if (transition.fadeOut || transition.fadeIn) {
       // One shared curve, so what leaves and what arrives always add up to one
       // and the building never appears to thin out. The curve is deliberately
@@ -1269,6 +1652,15 @@ function frame(now) {
       }
       if (transition.fadeOut) setOpacity(transition.fadeOut, outA, true);
       if (transition.fadeIn) setOpacity(transition.fadeIn, inA, inA < 0.92);
+    }
+    if (transition.context) {
+      const context = transition.context;
+      const u = (t - context.from) / Math.max(0.01, context.to - context.from);
+      const progress = smooth(THREE.MathUtils.clamp(u, 0, 1));
+      setContextAlpha(
+        context.objects,
+        context.fromAlpha + (context.toAlpha - context.fromAlpha) * progress
+      );
     }
     if (t >= 1) {
       const done = transition.onDone;
