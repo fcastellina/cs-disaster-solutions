@@ -367,7 +367,9 @@ function applyText() {
   viewerKicker.textContent = t.modalKicker;
   hint.textContent = level === 'city' ? t.hintCity : t.hintBuilding;
 }
-function viewWidth() { return Math.max(320, innerWidth - (document.body.classList.contains('edit-mode') ? 372 : 0)); }
+function viewWidth() {
+  return Math.max(320, innerWidth);
+}
 function resizeRenderer() {
   renderer.setSize(viewWidth(), innerHeight);
   if (composer) { composer.setSize(viewWidth(), innerHeight); if (bloomPass) bloomPass.setSize(viewWidth(), innerHeight); }
@@ -1277,17 +1279,15 @@ function selectSolution(b, sol) {
   placePreview();
   renderCrumbs();
   say(sol.title + ' selected.');
-  if (window.editorSyncSolution) window.editorSyncSolution(sol);
 }
 function placePreview() {
   const p = project(solutionWorld(activeBuilding, activeSolution, _v3));
   if (!p) { preview.style.opacity = '0'; return; }
   preview.style.opacity = '';
   const w = preview.offsetWidth || 330, h = preview.offsetHeight || 210;
-  const panel = document.body.classList.contains('edit-mode') ? 372 : 0;
   let x = p.x + 28, y = p.y - h * .42;
-  if (x + w > innerWidth - panel - 16) x = p.x - w - 28;
-  x = Math.max(16, Math.min(x, innerWidth - panel - w - 16));
+  if (x + w > innerWidth - 16) x = p.x - w - 28;
+  x = Math.max(16, Math.min(x, innerWidth - w - 16));
   y = Math.max(84, Math.min(y, innerHeight - h - 16));
   preview.style.left = x + 'px'; preview.style.top = y + 'px';
 }
