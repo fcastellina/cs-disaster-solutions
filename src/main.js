@@ -17,21 +17,44 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { CONFIG } from './config/navigator.config.js';
+import { dom } from './ui/dom.js';
 
-const $ = id => document.getElementById(id);
 const DEG = Math.PI / 180;
 const CAM_DIST = 1400;
 
-const app = $('app'), loading = $('loading'), loadingText = $('loadingText'), loadingBar = $('loadingBar');
-const buildingHotspots = $('buildingHotspots'), solutionHotspots = $('solutionHotspots');
-const preview = $('preview'), previewKicker = $('previewKicker'), previewTitle = $('previewTitle');
-const previewCopy = $('previewCopy'), previewNote = $('previewNote'), previewClose = $('previewClose');
-const playBtn = $('playBtn'), exploreBtn = $('exploreBtn');
-const backBtn = $('backBtn'), hint = $('hint'), crumbs = $('crumbs'), srStatus = $('srStatus');
-const modal = $('viewerModal'), closeViewerBtn = $('closeViewer'), sketchfabFrame = $('sketchfabFrame');
-const viewerTitle = $('viewerTitle'), viewerKicker = $('viewerKicker'), viewerBody = $('viewerBody');
-const providerName = $('providerName'), providerNote = $('providerNote'), providerLink = $('providerLink');
-const detailsLink = $('detailsLink'), specList = $('specList');
+const {
+  app,
+  loading,
+  loadingText,
+  loadingBar,
+  buildingHotspots,
+  solutionHotspots,
+  preview,
+  previewKicker,
+  previewTitle,
+  previewCopy,
+  previewNote,
+  previewClose,
+  playBtn,
+  exploreBtn,
+  backBtn,
+  hint,
+  crumbs,
+  srStatus,
+  modal,
+  closeViewerBtn,
+  sketchfabFrame,
+  viewerTitle,
+  viewerKicker,
+  viewerBody,
+  providerName,
+  providerNote,
+  providerLink,
+  detailsLink,
+  specList,
+  uiTitle,
+  uiSubtitle
+} = dom;
 
 /* ---- state ---------------------------------------------------------------- */
 let template = null, clips = [], terrain = null;
@@ -337,7 +360,7 @@ function applyColors() {
 }
 function applyText() {
   const t = CONFIG.text;
-  $('uiTitle').textContent = t.title; $('uiSubtitle').textContent = t.subtitle;
+  uiTitle.textContent = t.title; uiSubtitle.textContent = t.subtitle;
   document.title = t.title.replace(/·/g, '-');
   backBtn.textContent = t.back; exploreBtn.textContent = t.explore;
   providerLink.textContent = t.provider; detailsLink.textContent = t.details;
