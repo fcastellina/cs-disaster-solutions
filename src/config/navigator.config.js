@@ -65,8 +65,8 @@ export const CONFIG = {
     azimuth: 56,   // degrees around the vertical axis
     elevation: 38,   // degrees above the horizon
     padding: 1.35,   // used by the automatic framing modes
-    frustum: 123,   // used by manual framing. Smaller number = closer
-    target: [-7.1, 7.2, -13.6]   // the point the camera looks at
+    frustum: 58,   // used by manual framing. Smaller number = closer
+    target: [-5.6247, 0.4526, -8.2364]   // the point the camera looks at
   },
 
   /* level 2: how far the user may orbit */
