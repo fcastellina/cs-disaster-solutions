@@ -415,9 +415,6 @@ function prepareBranch(obj, opts) {
 }
 /* The exported ground plane carries no material, so glTF hands us the default
    fully metallic one. Give it something that reads as ground. */
-function applyGroundVisibility() {
-  if (terrain) terrain.visible = CONFIG.ground.visible !== false;
-}
 function prepareGround(obj) {
   obj.visible = CONFIG.ground.visible !== false;
   obj.traverse(o => {
@@ -455,7 +452,6 @@ function buildCity() {
     // than nothing, so a freshly loaded model is visible while it is mapped.
     let srcCity = template.getObjectByName(cfg.nodes.city);
     let srcDetail = template.getObjectByName(cfg.nodes.detail);
-    missingNodes = (!srcCity ? [cfg.nodes.city] : []).concat(!srcDetail ? [cfg.nodes.detail] : []);
     if (!srcCity && !srcDetail) { srcCity = template; srcDetail = template; }
     else if (!srcCity) srcCity = srcDetail;
     else if (!srcDetail) srcDetail = srcCity;
@@ -509,14 +505,12 @@ function aimSun() {
   cam.left = -half; cam.right = half; cam.top = half; cam.bottom = -half; cam.near = 1; cam.far = r * 7;
   cam.updateProjectionMatrix();
 }
-const fitShadow = aimSun;
 
 /* ---- material registry ---------------------------------------------------
    Every material in the model is indexed by its Blender name so the edit
    panel can change all copies of it at once. The values the model shipped
    with are remembered, so any override can be undone. */
 let materialIndex = new Map();
-let missingNodes = [];
 function indexMaterials() {
   materialIndex = new Map();
   buildings.forEach(b => [b.cityObj, b.detailObj].forEach(root => {
@@ -590,240 +584,6 @@ function replacementTexture(url, srgb, proto) {
   texCache.set(key, tex);
   return tex;
 }
-/* ---- swapping the 3D model ----------------------------------------------
-   The bytes are kept so that saving can write them into the file. */
-let pendingModelB64 = null;
-let pendingExport = null;     // set when a .gltf needs repacking into a .glb at save time
-let pendingFiles = null;      // the files that .gltf came with
-function bytesToBase64(buf) {
-  const bytes = new Uint8Array(buf); let out = ''; const step = 0x8000;
-  for (let i = 0; i < bytes.length; i += step) out += String.fromCharCode.apply(null, bytes.subarray(i, i + step));
-  return btoa(out);
-}
-/* A .glb is one self contained file. A .gltf is only the description: the
-   geometry sits in a .bin and the textures are separate images beside it. So
-   the picker takes several files, or a whole folder, and every relative path
-   inside the .gltf is redirected to the matching file the user chose. */
-function indexPickedFiles(files) {
-  const list = Array.from(files || []);
-  const byName = new Map();
-  list.forEach(f => {
-    const rel = f.webkitRelativePath || f.name;
-    byName.set(rel, f);
-    byName.set(rel.split('/').pop(), f);
-    byName.set(decodeURIComponent(rel.split('/').pop()), f);
-  });
-  const entry = list.find(f => /\.glb$/i.test(f.name)) || list.find(f => /\.gltf$/i.test(f.name));
-  return { list, byName, entry };
-}
-function loadModelFiles(files) {
-  const { list, byName, entry } = indexPickedFiles(files);
-  if (!entry) return Promise.reject(new Error('No .glb or .gltf among those files.'));
-  const isGlb = /\.glb$/i.test(entry.name);
-  const made = [];
-  const manager = new THREE.LoadingManager();
-  manager.setURLModifier(url => {
-    if (/^data:/i.test(url)) return url;
-    const clean = url.split('?')[0].split('#')[0];
-    const base = decodeURIComponent(clean.split('/').pop() || '');
-    const f = byName.get(base);
-    if (!f) return url;
-    const u = URL.createObjectURL(f);
-    made.push(u);
-    return u;
-  });
-  return entry.arrayBuffer().then(async buf => {
-    const gl = await attachDecoders(new GLTFLoader(manager));
-    return new Promise((resolve, reject) => {
-      const rootUrl = URL.createObjectURL(new Blob([buf]));
-      made.push(rootUrl);
-      gl.load(rootUrl,
-        g => {
-          made.forEach(u => URL.revokeObjectURL(u));
-          resolve({ gltf: g, buf: isGlb ? buf : null, name: entry.name, count: list.length, entry, byName });
-        },
-        undefined,
-        e => { made.forEach(u => URL.revokeObjectURL(u)); reject(e); });
-    });
-  });
-}
-/* A .gltf and its companion files cannot be pasted into the HTML as they are,
-   so they are repacked into a single .glb. This copies the existing bytes and
-   re-encodes nothing, so quality and file size are exactly what came out of
-   Blender. Re-exporting through three's exporter would rewrite every texture
-   as PNG, which on this model turns 3.4 MB into tens of megabytes. */
-const IMAGE_TYPES = {
-  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp',
-  ktx2: 'image/ktx2', basis: 'image/basis', avif: 'image/avif'
-};
-function align4(n) { return n + ((4 - (n % 4)) % 4); }
-async function bytesForUri(uri, byName) {
-  if (/^data:/i.test(uri)) {
-    const b64 = uri.slice(uri.indexOf(',') + 1);
-    const bin = atob(b64);
-    const out = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-    return out;
-  }
-  const base = decodeURIComponent(uri.split('?')[0].split('#')[0].split('/').pop());
-  const f = byName.get(base);
-  if (!f) throw new Error('Missing file: ' + base);
-  return new Uint8Array(await f.arrayBuffer());
-}
-async function repackGltfToGlb(entry, byName) {
-  const json = JSON.parse(await entry.text());
-  const parts = []; let offset = 0;
-  const put = bytes => {
-    const at = offset;
-    parts.push(bytes);
-    offset += bytes.byteLength;
-    const pad = align4(offset) - offset;
-    if (pad) { parts.push(new Uint8Array(pad)); offset += pad; }
-    return at;
-  };
-  // every existing buffer becomes one region of the single binary chunk
-  const bases = [];
-  for (const buf of (json.buffers || [])) {
-    if (buf.uri) bases.push(put(await bytesForUri(buf.uri, byName)));
-    else bases.push(0);                       // already the binary chunk of a glb
-  }
-  (json.bufferViews || []).forEach(bv => {
-    bv.byteOffset = (bases[bv.buffer] || 0) + (bv.byteOffset || 0);
-    bv.buffer = 0;
-  });
-  // every image file becomes a buffer view of its own
-  json.bufferViews = json.bufferViews || [];
-  for (const img of (json.images || [])) {
-    if (!img.uri) continue;
-    const ext = (img.uri.split('.').pop() || '').toLowerCase().split(/[?#]/)[0];
-    const bytes = await bytesForUri(img.uri, byName);
-    const at = put(bytes);
-    json.bufferViews.push({ buffer: 0, byteOffset: at, byteLength: bytes.byteLength });
-    img.bufferView = json.bufferViews.length - 1;
-    img.mimeType = img.mimeType || IMAGE_TYPES[ext] || 'image/png';
-    delete img.uri;
-  }
-  json.buffers = [{ byteLength: offset }];
-
-  const bin = new Uint8Array(offset);
-  let at = 0;
-  parts.forEach(part => { bin.set(part, at); at += part.byteLength; });
-
-  const jsonBytes = new TextEncoder().encode(JSON.stringify(json));
-  const jsonPad = align4(jsonBytes.length) - jsonBytes.length;
-  const jsonChunk = new Uint8Array(jsonBytes.length + jsonPad);
-  jsonChunk.set(jsonBytes, 0);
-  jsonChunk.fill(0x20, jsonBytes.length);      // JSON pads with spaces
-  const total = 12 + 8 + jsonChunk.length + 8 + bin.length;
-  const out = new ArrayBuffer(total);
-  const dv = new DataView(out);
-  const u8 = new Uint8Array(out);
-  dv.setUint32(0, 0x46546C67, true);            // 'glTF'
-  dv.setUint32(4, 2, true);
-  dv.setUint32(8, total, true);
-  dv.setUint32(12, jsonChunk.length, true);
-  dv.setUint32(16, 0x4E4F534A, true);           // 'JSON'
-  u8.set(jsonChunk, 20);
-  const binAt = 20 + jsonChunk.length;
-  dv.setUint32(binAt, bin.length, true);
-  dv.setUint32(binAt + 4, 0x004E4942, true);      // 'BIN'
-  u8.set(bin, binAt + 8);
-  return out;
-}
-/* Last resort if the repack cannot cope with the file. */
-async function templateAsGlb() {
-  const mod = await import(/* @vite-ignore */ JSM + 'exporters/GLTFExporter.js/+esm');
-  const buf = await new Promise((resolve, reject) => {
-    new mod.GLTFExporter().parse(template, resolve, reject,
-      { binary: true, animations: clips, embedImages: true });
-  });
-  return buf instanceof ArrayBuffer ? buf : new TextEncoder().encode(JSON.stringify(buf)).buffer;
-}
-function adoptModel(gltf, buf, needsExport) {
-  warmed = false;
-  template = gltf.scene;
-  clips = gltf.animations || [];
-  if (buf) { pendingModelB64 = bytesToBase64(buf); pendingExport = null; }
-  else if (needsExport) { pendingModelB64 = null; pendingExport = true; }
-  attachTerrain();
-  rebuild();
-  applyLighting();
-  applyShadows();
-}
-function modelNodeNames() {
-  const out = [];
-  if (template) template.traverse(o => { if (o.name) out.push(o.name); });
-  return [...new Set(out)].sort();
-}
-
-/* ---- turning a picked HDRI into something the file can carry ------------- */
-function floatEquirectToDataUrl(parsed, maxSize) {
-  const w = parsed.width, h = parsed.height, data = parsed.data;
-  const enc = v => {
-    const t = v / (1 + v);                                   // Reinhard, keeps highlights in range
-    const s = t <= 0.0031308 ? t * 12.92 : 1.055 * Math.pow(t, 1 / 2.4) - 0.055;
-    return Math.max(0, Math.min(255, Math.round(s * 255)));
-  };
-  const full = document.createElement('canvas'); full.width = w; full.height = h;
-  const fx = full.getContext('2d');
-  const id = fx.createImageData(w, h);
-  for (let i = 0, p = 0; i < w * h; i++) {
-    id.data[p++] = enc(data[i * 4]); id.data[p++] = enc(data[i * 4 + 1]);
-    id.data[p++] = enc(data[i * 4 + 2]); id.data[p++] = 255;
-  }
-  fx.putImageData(id, 0, 0);
-  const sc = Math.min(1, maxSize / Math.max(w, h));
-  const dw = Math.max(2, Math.round(w * sc)), dh = Math.max(1, Math.round(h * sc));
-  const out = document.createElement('canvas'); out.width = dw; out.height = dh;
-  out.getContext('2d').drawImage(full, 0, 0, dw, dh);
-  let url = out.toDataURL('image/webp', 0.9);
-  if (url.indexOf('data:image/webp') !== 0) url = out.toDataURL('image/jpeg', 0.92);
-  return { url, w: dw, h: dh };
-}
-async function environmentFileToDataUrl(file, maxSize) {
-  const name = (file.name || '').toLowerCase();
-  if (name.endsWith('.hdr')) {
-    // three renamed this loader; try the current name first, then the old one
-    let loader = null;
-    try {
-      const mod = await import(/* @vite-ignore */ JSM + 'loaders/HDRLoader.js/+esm');
-      loader = new mod.HDRLoader();
-    } catch (e) {
-      const mod = await import(/* @vite-ignore */ JSM + 'loaders/RGBELoader.js/+esm');
-      loader = new mod.RGBELoader();
-    }
-    if (loader.setDataType) loader.setDataType(THREE.FloatType);
-    const parsed = loader.parse(await file.arrayBuffer());
-    return floatEquirectToDataUrl(parsed, maxSize);
-  }
-  if (name.endsWith('.exr')) throw new Error('EXR is not supported. Please use .hdr, or a jpg or png panorama.');
-  return imageToDataUrl(file, maxSize);
-}
-
-/* Re-encodes a picked image so the file does not grow out of hand. */
-function imageToDataUrl(file, maxSize) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error('could not read the file'));
-    reader.onload = () => {
-      const img = new Image();
-      img.onerror = () => reject(new Error('that file is not an image'));
-      img.onload = () => {
-        let w = img.naturalWidth, h = img.naturalHeight;
-        const scale = Math.min(1, maxSize / Math.max(w, h));
-        w = Math.max(1, Math.round(w * scale)); h = Math.max(1, Math.round(h * scale));
-        const c = document.createElement('canvas'); c.width = w; c.height = h;
-        c.getContext('2d').drawImage(img, 0, 0, w, h);
-        let out = c.toDataURL('image/webp', 0.85);
-        if (out.indexOf('data:image/webp') !== 0) out = c.toDataURL('image/jpeg', 0.88);
-        resolve({ url: out, w, h });
-      };
-      img.src = reader.result;
-    };
-    reader.readAsDataURL(file);
-  });
-}
-
 /* ---- sizing and placing a whole object ----------------------------------
    The exported transform is remembered the first time an object is touched,
    so an override can always be undone and scale can multiply rather than
@@ -844,19 +604,6 @@ function applyNodeTransform(obj, name) {
     if (t.rotation) obj.rotation.set(base.r.x + (t.rotation[0] || 0) * DEG, base.r.y + (t.rotation[1] || 0) * DEG, base.r.z + (t.rotation[2] || 0) * DEG);
   }
   obj.updateMatrixWorld(true);
-}
-function applyAllNodeTransforms() {
-  buildings.forEach(b => {
-    applyNodeTransform(b.cityObj, b.cfg.nodes.city);
-    applyNodeTransform(b.detailObj, b.cfg.nodes.detail);
-    b.group.updateMatrixWorld(true);
-    b.cityBox = worldBox(b.cityObj);
-    b.detailBox = worldBox(b.detailObj);
-    if (b.nodeCache) b.nodeCache.clear();
-  });
-  if (terrain) applyNodeTransform(terrain, CONFIG.model.terrainNode);
-  aimSun();
-  markDirty(500);
 }
 /* One place that builds the ground, so every path agrees. */
 function attachTerrain() {
@@ -1368,11 +1115,6 @@ function pickBuilding(e) {
   }
   return null;
 }
-function pickPoint(e, obj) {
-  ray.setFromCamera(pointerNdc(e), camera);
-  const hits = ray.intersectObject(obj, true);
-  return hits.length ? hits[0].point.clone() : null;
-}
 renderer.domElement.addEventListener('pointerdown', e => { downAt = { x: e.clientX, y: e.clientY }; });
 renderer.domElement.addEventListener('pointerup', e => {
   if (!downAt) return;
@@ -1530,14 +1272,6 @@ function frame(now) {
 /* ============================================================================
    BOOT
    ============================================================================ */
-function rebuild() {
-  buildCity(); buildMarkers();
-  if (template) prewarm();
-  if (level === 'building') {
-    const b = activeBuilding || buildings[0];
-    if (b) goBuilding(b, false); else goCity(false);
-  } else goCity(false);
-}
 
 /* If a base64 GLB is pasted between the quotes below, it is used instead of
    CONFIG.model.url and this HTML file becomes fully self-contained. The
@@ -1568,17 +1302,6 @@ async function attachDecoders(target) {
   if (decoderCache.meshopt && target.setMeshoptDecoder) target.setMeshoptDecoder(decoderCache.meshopt);
   if (decoderCache.ktx2 && target.setKTX2Loader) target.setKTX2Loader(decoderCache.ktx2);
   return target;
-}
-/* Turns a loader failure into something a person can act on. */
-function modelErrorText(err, fileCount) {
-  const raw = String((err && (err.message || err)) || '');
-  if (/DRACOLoader/i.test(raw)) return 'This model uses Draco mesh compression and the decoder could not be loaded. Re-export it from Blender with compression off, or check your connection.';
-  if (/KTX2|basisu/i.test(raw)) return 'This model uses KTX2 textures and the transcoder could not be loaded. Re-export with ordinary png or jpg textures.';
-  if (/meshopt/i.test(raw)) return 'This model uses meshopt compression and the decoder could not be loaded.';
-  if (/Unexpected token|JSON|Invalid typed array|Unsupported glTF|Unknown/i.test(raw))
-    return fileCount > 1 ? 'Those files could not be read. Check the .bin and every texture are included.'
-      : 'That file could not be read as glTF. If it is a .gltf, its .bin and textures have to be selected too.';
-  return 'The model could not be loaded: ' + (raw.slice(0, 140) || 'unknown error');
 }
 
 const loader = new GLTFLoader();
