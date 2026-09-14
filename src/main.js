@@ -17,6 +17,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CONFIG } from './config/navigator.config.js';
 import { dom } from './ui/dom.js';
+import { createHazardMap } from './ui/hazard-map.js';
 import { loadCityModel } from './three/model-loader.js';
 
 const DEG = Math.PI / 180;
@@ -65,6 +66,7 @@ let activeSolution = null;
 let transition = null;              // {from,to,start,duration}
 let frustum = CONFIG.cityView.frustum;
 let swayUntil = 0, swayBuilding = null;
+let hazardAreaVisible = true;
 
 /* ---- renderer, scene, camera --------------------------------------------- */
 const scene = new THREE.Scene();
@@ -845,7 +847,7 @@ function goCity(animated = true) {
     if (animated) startTransition(to, CONFIG.transitions.toCity, { onDone: finishCityView });
     else { applyCamState(to); finishCityView(); }
   }
-  backBtn.hidden = true;
+  backBtn.hidden = hazardAreaVisible;
   hint.textContent = CONFIG.text.hintCity; hint.style.opacity = '1';
   renderCrumbs(); say('City view. ' + CONFIG.text.hintCity + '.');
 }
@@ -1142,7 +1144,22 @@ renderer.domElement.addEventListener('pointermove', e => {
 });
 
 /* ---- wiring --------------------------------------------------------------- */
-backBtn.addEventListener('click', () => goCity());
+const hazardMap = createHazardMap({
+  onEnterCity() {
+    hazardAreaVisible = false;
+    hazardMap.hide();
+    if (template) goCity(false);
+    backBtn.hidden = false;
+  }
+});
+backBtn.addEventListener('click', () => {
+  if (level === 'building') goCity();
+  else {
+    hazardAreaVisible = true;
+    hazardMap.show();
+    backBtn.hidden = true;
+  }
+});
 previewClose.addEventListener('click', hidePreview);
 exploreBtn.addEventListener('click', openViewer);
 playBtn.addEventListener('click', playAnimation);

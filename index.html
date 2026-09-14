@@ -16,6 +16,47 @@
   </head>
   <body>
     <div id="app">
+      <section id="hazardMap" class="hazard-map" aria-labelledby="hazardMapTitle">
+        <div class="hazard-map-panel">
+          <div class="hazard-map-kicker">Level 1</div>
+          <h2 id="hazardMapTitle">Hazard Area</h2>
+          <p class="hazard-map-subtitle">Where is the hazard?</p>
+          <div class="hazard-list" role="list" aria-label="Hazards">
+            <button class="hazard-option is-selected" type="button" data-hazard="earthquake">
+              Earthquake
+            </button>
+            <button class="hazard-option" type="button" data-hazard="landslide" disabled>
+              Landslide
+            </button>
+            <button class="hazard-option" type="button" data-hazard="tsunami" disabled>
+              Tsunami
+            </button>
+            <button class="hazard-option" type="button" data-hazard="flood-storm" disabled>
+              Flood &amp; Storm
+            </button>
+            <button class="hazard-option" type="button" data-hazard="fire" disabled>
+              Fire
+            </button>
+            <button class="hazard-option" type="button" data-hazard="extreme-temperature" disabled>
+              Extreme Temperature
+            </button>
+            <button class="hazard-option" type="button" data-hazard="pandemic" disabled>
+              Pandemic
+            </button>
+          </div>
+        </div>
+        <div class="hazard-map-stage" aria-label="Hazard map">
+          <div class="hazard-zone" aria-hidden="true"></div>
+          <button class="hazard-marker" id="hazardCityMarker" type="button">
+            <span class="hazard-marker-dot" aria-hidden="true"></span>
+            <span class="hazard-marker-copy">
+              <strong>City Centre</strong>
+              <span>High seismic risk</span>
+            </span>
+          </button>
+        </div>
+      </section>
+
       <!-- ===== Header ===== -->
       <div class="topbar">
         <div class="topbar-accent"></div>

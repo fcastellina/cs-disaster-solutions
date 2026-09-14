@@ -48,6 +48,154 @@ canvas {
   display: block;
 }
 
+/* ---------- Hazard map --------------------------------------------------- */
+.hazard-map {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  grid-template-columns: minmax(250px, 29%) 1fr;
+  background: var(--paper);
+  transition: opacity 0.35s ease, visibility 0.35s ease;
+}
+.hazard-map.is-hidden {
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+}
+.hazard-map-panel {
+  z-index: 1;
+  padding: clamp(32px, 6vw, 86px) clamp(24px, 4vw, 64px);
+  background: #fff;
+  border-right: 1px solid var(--line);
+}
+.hazard-map-kicker {
+  margin-bottom: 12px;
+  color: var(--brand);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.hazard-map-panel h2 {
+  margin: 0 0 8px;
+  color: var(--brand-dark);
+  font-size: clamp(28px, 3vw, 44px);
+  line-height: 1;
+}
+.hazard-map-subtitle {
+  margin: 0 0 42px;
+  color: var(--steel);
+  font-size: 14px;
+}
+.hazard-list {
+  display: grid;
+  gap: 6px;
+}
+.hazard-option {
+  border: 0;
+  border-left: 3px solid transparent;
+  padding: 12px 14px;
+  background: transparent;
+  color: var(--steel);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.hazard-option.is-selected {
+  border-left-color: var(--brand);
+  background: var(--steel-10);
+  color: var(--brand-dark);
+  font-weight: 700;
+}
+.hazard-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.hazard-option:not(:disabled):hover {
+  background: var(--steel-10);
+  color: var(--brand-dark);
+}
+.hazard-map-stage {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  background-color: #dce6ec;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.2)),
+    url("/images/maps/city-overview.webp");
+  background-position: center;
+  background-size: cover;
+}
+.hazard-map-stage::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.16), transparent 48%, rgba(0, 36, 63, 0.12));
+  content: "";
+  pointer-events: none;
+}
+.hazard-zone {
+  position: absolute;
+  z-index: 1;
+  left: 22%;
+  top: 24%;
+  width: 48%;
+  height: 46%;
+  border: 2px solid rgba(3, 93, 173, 0.7);
+  border-radius: 48% 52% 42% 58%;
+  background: rgba(3, 93, 173, 0.18);
+  box-shadow: 0 0 0 18px rgba(3, 93, 173, 0.07);
+  transform: rotate(-12deg);
+}
+.hazard-marker {
+  position: absolute;
+  z-index: 2;
+  left: 52%;
+  top: 47%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--brand-dark);
+  text-align: left;
+  cursor: pointer;
+  transform: translate(-8%, -50%);
+}
+.hazard-marker-dot {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border: 4px solid #fff;
+  border-radius: 50%;
+  background: var(--brand);
+  box-shadow: 0 0 0 5px rgba(3, 93, 173, 0.28), 0 2px 8px rgba(0, 19, 31, 0.3);
+}
+.hazard-marker-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 142px;
+  padding: 10px 13px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 3px 12px rgba(0, 19, 31, 0.16);
+}
+.hazard-marker-copy strong {
+  font-size: 13px;
+}
+.hazard-marker-copy span {
+  color: var(--steel);
+  font-size: 11px;
+}
+.hazard-marker:hover .hazard-marker-copy,
+.hazard-marker:focus-visible .hazard-marker-copy {
+  color: var(--brand);
+}
+.hazard-marker:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 6px;
+}
+
 /* ---------- Header ---------- */
 .topbar {
   position: absolute;
