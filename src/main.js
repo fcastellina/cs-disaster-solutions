@@ -15,9 +15,9 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { CONFIG } from './config/navigator.config.js';
 import { dom } from './ui/dom.js';
+import { loadCityModel } from './three/model-loader.js';
 
 const DEG = Math.PI / 180;
 const CAM_DIST = 1400;
@@ -1278,66 +1278,39 @@ function frame(now) {
    two file version leaves it empty and loads DPR_CITY.glb from the folder. */
 const EMBEDDED_MODEL = ''; // Development uses public/models/DPR_CITY.glb
 
-/* Blender's exporter can compress meshes, and textures can be KTX2. Each of
-   those needs its own decoder, otherwise GLTFLoader simply refuses the file.
-   They are attached lazily, so a plain model downloads none of them. */
-let decoderCache = null;
-async function attachDecoders(target) {
-  if (!decoderCache) {
-    decoderCache = {};
-    try {
-      const m = await import(/* @vite-ignore */ JSM + 'loaders/DRACOLoader.js/+esm');
-      decoderCache.draco = new m.DRACOLoader().setDecoderPath(JSM + 'libs/draco/gltf/');
-    } catch (err) { console.warn('Draco decoder unavailable.', err); }
-    try {
-      const m = await import(/* @vite-ignore */ JSM + 'libs/meshopt_decoder.module.js/+esm');
-      decoderCache.meshopt = m.MeshoptDecoder || m.default;
-    } catch (err) { console.warn('Meshopt decoder unavailable.', err); }
-    try {
-      const m = await import(/* @vite-ignore */ JSM + 'loaders/KTX2Loader.js/+esm');
-      decoderCache.ktx2 = new m.KTX2Loader().setTranscoderPath(JSM + 'libs/basis/').detectSupport(renderer);
-    } catch (err) { console.warn('KTX2 decoder unavailable.', err); }
-  }
-  if (decoderCache.draco && target.setDRACOLoader) target.setDRACOLoader(decoderCache.draco);
-  if (decoderCache.meshopt && target.setMeshoptDecoder) target.setMeshoptDecoder(decoderCache.meshopt);
-  if (decoderCache.ktx2 && target.setKTX2Loader) target.setKTX2Loader(decoderCache.ktx2);
-  return target;
-}
-
-const loader = new GLTFLoader();
 const modelUrl = EMBEDDED_MODEL
   ? URL.createObjectURL(new Blob([Uint8Array.from(atob(EMBEDDED_MODEL), c => c.charCodeAt(0))], { type: 'model/gltf-binary' }))
   : (new URLSearchParams(location.search).get('model') || CONFIG.model.url);
 
-attachDecoders(loader).catch(() => { }).then(() => {
-  loader.load(modelUrl, gltf => {
-    if (EMBEDDED_MODEL) URL.revokeObjectURL(modelUrl);
-    template = gltf.scene;
-    clips = gltf.animations || [];
+loadCityModel({
+  renderer,
+  modelUrl,
+  onProgress: xhr => {
+    if (xhr.total) loadingBar.style.width = Math.round(xhr.loaded / xhr.total * 100) + '%';
+  }
+}).then(gltf => {
+  if (EMBEDDED_MODEL) URL.revokeObjectURL(modelUrl);
+  template = gltf.scene;
+  clips = gltf.animations || [];
 
-    attachTerrain();
+  attachTerrain();
 
-    applyColors();
-    applyPost();
-    buildCity();
-    applyLighting();
-    applyShadows();
-    buildMarkers();
-    applyText();
-    goCity(false);
+  applyColors();
+  applyPost();
+  buildCity();
+  applyLighting();
+  applyShadows();
+  buildMarkers();
+  applyText();
+  goCity(false);
 
-    prewarm();
-    loading.classList.add('hidden');
-    setTimeout(() => loading.remove(), 350);
-    requestAnimationFrame(frame);
-  },
-    xhr => {
-      if (xhr.total) loadingBar.style.width = Math.round(xhr.loaded / xhr.total * 100) + '%';
-    },
-    err => {
-      console.error(err);
-      loadingText.innerHTML = 'The model could not be loaded.<br><br>' +
-        'Keep <b>' + modelUrl + '</b> in the same folder as this HTML file, and open the page through a web server or an LMS rather than straight from the desktop.';
-      loadingBar.parentElement.style.display = 'none';
-    });
+  prewarm();
+  loading.classList.add('hidden');
+  setTimeout(() => loading.remove(), 350);
+  requestAnimationFrame(frame);
+}).catch(err => {
+  console.error(err);
+  loadingText.innerHTML = 'The model could not be loaded.<br><br>' +
+    'Keep <b>' + modelUrl + '</b> in the same folder as this HTML file, and open the page through a web server or an LMS rather than straight from the desktop.';
+  loadingBar.parentElement.style.display = 'none';
 });
