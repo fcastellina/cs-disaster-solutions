@@ -17,7 +17,7 @@
   <body>
     <div id="app">
       <section id="hazardMap" class="hazard-map" aria-labelledby="hazardMapTitle">
-        <div class="hazard-map-panel">
+        <div class="hazard-map-panel" id="hazardMapPanel">
           <div class="hazard-map-kicker">Level 1</div>
           <h2 id="hazardMapTitle">Hazard Area</h2>
           <p class="hazard-map-subtitle">Where is the hazard?</p>
@@ -46,6 +46,16 @@
           </div>
         </div>
         <div class="hazard-map-stage" aria-label="Hazard map">
+          <button
+            class="hazard-menu-toggle"
+            id="hazardMenuToggle"
+            type="button"
+            aria-controls="hazardMapPanel"
+            aria-expanded="false"
+            aria-label="Open hazard menu"
+          >
+            <span aria-hidden="true">☰</span>
+          </button>
           <div class="hazard-zone" aria-hidden="true"></div>
           <button class="hazard-marker" id="hazardCityMarker" type="button">
             <span class="hazard-marker-dot" aria-hidden="true"></span>
