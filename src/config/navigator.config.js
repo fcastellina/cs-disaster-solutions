@@ -17,7 +17,8 @@ export const CONFIG = {
     visible: true,   // false hides the very large ground plane so the backdrop shows
     useModelMaterial: true,   // keep Blender materials where they exist
     color: "#A8C24E",
-    roughness: 0.96
+    roughness: 0.96,
+    hideTexturesInBuilding: ["TOPOGRAPHY_diff.png", "Lake_diff.png"]
   },
 
   /* fallback for Blender objects that have no assigned material */
@@ -200,8 +201,8 @@ export const CONFIG = {
       rotation: 0,
       scale: 1,
       nodes: {
-        city: "_HERO_HP_ONEBLOORWEST_ROOT",
-        detail: "_HERO_LP_ONEBLOORWEST_ROOT"
+        city: "_HERO_LP_ONEBLOORWEST_ROOT",
+        detail: "_HERO_HP_ONEBLOORWEST_ROOT"
       },
       markerHeight: 0.55,
       contextParts: ["Side_building", "Crystal_long", "Crystal_plant"],

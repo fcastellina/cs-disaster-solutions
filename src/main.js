@@ -483,6 +483,84 @@ function prepareGround(obj) {
       : groundMaterialFor(o.material);
   });
 }
+function normalizeTextureName(value) {
+  if (!value) return '';
+  const raw = String(value).replace(/\\/g, '/').split(/[?#]/, 1)[0];
+  const basename = raw.slice(raw.lastIndexOf('/') + 1);
+  return basename
+    .replace(/\.(png|jpe?g|webp)$/i, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+function textureNames(texture) {
+  if (!texture) return [];
+  const image = texture.image;
+  const sourceData = texture.source && texture.source.data;
+  return [texture.name, image && image.name, image && image.src, sourceData && sourceData.name, sourceData && sourceData.src]
+    .map(normalizeTextureName)
+    .filter(Boolean);
+}
+function terrainMaterials(callback) {
+  if (!terrain) return;
+  terrain.traverse(object => {
+    if (!object.material) return;
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    materials.forEach(callback);
+  });
+}
+const terrainTextureVisibilityUniforms = new Set();
+const TERRAIN_MAP_FRAGMENT = `
+#ifdef USE_MAP
+  vec4 sampledDiffuseColor = texture2D(map, vMapUv);
+
+  #ifdef DECODE_VIDEO_TEXTURE
+    sampledDiffuseColor = sRGBTransferEOTF(sampledDiffuseColor);
+  #endif
+
+  sampledDiffuseColor = mix(
+    vec4(1.0),
+    sampledDiffuseColor,
+    dsnMapVisibility
+  );
+
+  diffuseColor *= sampledDiffuseColor;
+#endif`;
+function installTerrainTextureFade() {
+  const configured = (CONFIG.ground.hideTexturesInBuilding || []).map(normalizeTextureName).filter(Boolean);
+  const matched = new Set();
+  terrainMaterials(material => {
+    if (!material.map || !textureNames(material.map).some(name => configured.includes(name))) return;
+    configured.forEach(name => {
+      if (textureNames(material.map).includes(name)) matched.add(name);
+    });
+    let visibility = material.userData._dsnMapVisibility;
+    if (!visibility) {
+      visibility = material.userData._dsnMapVisibility = { value: 1 };
+      const previousOnBeforeCompile = material.onBeforeCompile;
+      const previousCacheKey = material.customProgramCacheKey;
+      material.onBeforeCompile = shader => {
+        if (previousOnBeforeCompile) previousOnBeforeCompile(shader);
+        shader.uniforms.dsnMapVisibility = visibility;
+        shader.fragmentShader = shader.fragmentShader
+          .replace('#include <map_fragment>', TERRAIN_MAP_FRAGMENT)
+          .replace('void main() {', 'uniform float dsnMapVisibility;\nvoid main() {');
+      };
+      material.customProgramCacheKey = () =>
+        (typeof previousCacheKey === 'function' ? previousCacheKey.call(material) : '') +
+        '|dsn-terrain-map-visibility';
+      material.needsUpdate = true;
+    }
+    terrainTextureVisibilityUniforms.add(visibility);
+  });
+  if (import.meta.env.DEV) {
+    (CONFIG.ground.hideTexturesInBuilding || []).forEach((name, index) => {
+      if (!matched.has(configured[index])) console.warn('[DSN] Terrain texture not found: ' + name);
+    });
+  }
+}
+function setTerrainTextureVisibility(value) {
+  terrainTextureVisibilityUniforms.forEach(uniform => { uniform.value = value; });
+}
 function setOpacity(obj, v, noDepth) {
   const factor = THREE.MathUtils.clamp(v, 0, 1);
   eachMaterial(obj, m => {
@@ -808,6 +886,7 @@ function attachTerrain() {
   prepareGround(terrain);
   applyNodeTransformsInTree(terrain);
   scene.add(terrain);
+  installTerrainTextureFade();
   markDirty(400);
 }
 
@@ -1096,6 +1175,12 @@ function goCity(animated = true) {
           at: 1 - (CONFIG.transitions.swapAt == null ? 0.5 : CONFIG.transitions.swapAt)
         },
         context,
+        terrainTextureFade: {
+          from: 0,
+          to: 1,
+          start: 1 - surroundings.to,
+          end: 1 - surroundings.from
+        },
         onDone: finishCityView
       });
     } else {
@@ -1107,6 +1192,12 @@ function goCity(animated = true) {
         fadeOut: from.detailObj,
         fadeIn: from.cityObj,
         context,
+        terrainTextureFade: {
+          from: 0,
+          to: 1,
+          start: 1 - surroundings.to,
+          end: 1 - surroundings.from
+        },
         onDone: finishCityView
       });
     }
@@ -1119,13 +1210,18 @@ function goCity(animated = true) {
     });
     clearSurroundings();
     if (animated) startTransition(to, CONFIG.transitions.toCity, { onDone: finishCityView });
-    else { applyCamState(to); finishCityView(); }
+    else {
+      applyCamState(to);
+      setTerrainTextureVisibility(1);
+      finishCityView();
+    }
   }
   backBtn.hidden = hazardAreaVisible;
   hint.textContent = CONFIG.text.hintCity; hint.style.opacity = '1';
   renderCrumbs(); say('City view. ' + CONFIG.text.hintCity + '.');
 }
 function finishCityView() {
+  setTerrainTextureVisibility(1);
   buildings.forEach(b => {
     b.cityObj.visible = true; b.detailObj.visible = false;
     setOpacity(b.cityObj, 1); setOpacity(b.detailObj, 1);
@@ -1172,6 +1268,12 @@ function goBuilding(b, animated = true) {
           at: CONFIG.transitions.swapAt == null ? 0.5 : CONFIG.transitions.swapAt
         },
         context,
+        terrainTextureFade: {
+          from: 1,
+          to: 0,
+          start: surroundings.from,
+          end: surroundings.to
+        },
         onDone: finishEnterBuilding
       });
     } else {
@@ -1183,6 +1285,12 @@ function goBuilding(b, animated = true) {
         fadeOut: b.cityObj,
         fadeIn: b.detailObj,
         context,
+        terrainTextureFade: {
+          from: 1,
+          to: 0,
+          start: surroundings.from,
+          end: surroundings.to
+        },
         onDone: finishEnterBuilding
       });
     }
@@ -1192,6 +1300,7 @@ function goBuilding(b, animated = true) {
     b.detailObj.visible = true;
     applyBuildingFocus(b);
     applyCamState(to);
+    setTerrainTextureVisibility(0);
     finishEnterBuilding();
   }
   backBtn.hidden = false;
@@ -1199,6 +1308,7 @@ function goBuilding(b, animated = true) {
   renderCrumbs();
 }
 function finishEnterBuilding() {
+  setTerrainTextureVisibility(0);
   buildings.forEach(o => {
     const on = o === activeBuilding;
     o.cityObj.visible = !on;
@@ -1624,6 +1734,12 @@ function frame(now) {
     frustum = THREE.MathUtils.lerp(a.frustum, b.frustum, e);
     camera.zoom = THREE.MathUtils.lerp(a.zoom, b.zoom, e);
     setFrustum(frustum);
+    if (transition.terrainTextureFade) {
+      const fade = transition.terrainTextureFade;
+      const fadeRange = Math.max(0.01, fade.end - fade.start);
+      const progress = smooth(THREE.MathUtils.clamp((t - fade.start) / fadeRange, 0, 1));
+      setTerrainTextureVisibility(THREE.MathUtils.lerp(fade.from, fade.to, progress));
+    }
     if (transition.swap && !transition.swap.done &&
         t >= THREE.MathUtils.clamp(transition.swap.at == null ? 0.5 : transition.swap.at, 0.05, 0.95)) {
       if (transition.swap.from) transition.swap.from.visible = false;
@@ -1663,6 +1779,9 @@ function frame(now) {
       );
     }
     if (t >= 1) {
+      if (transition.terrainTextureFade) {
+        setTerrainTextureVisibility(transition.terrainTextureFade.to);
+      }
       const done = transition.onDone;
       transition = null;
       if (done) done();
