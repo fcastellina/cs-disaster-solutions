@@ -1323,8 +1323,9 @@ function finishEnterBuilding() {
   say(activeBuilding.cfg.name + '. ' + CONFIG.text.hintBuilding + '.');
 }
 function renderCrumbs() {
-  const parts = ['<b>City</b>'];
-  if (activeBuilding) parts.push('<span>›</span>' + (level === 'building' ? '<b>' + activeBuilding.cfg.name + '</b>' : activeBuilding.cfg.name));
+  const parts = activeBuilding
+    ? ['<b>Level 3 · Mitigation Solutions</b>', '<span>›</span><b>' + activeBuilding.cfg.name + '</b>']
+    : ['<b>Level 2 · Infrastructure</b>'];
   if (activeSolution && modal.classList.contains('open')) parts.push('<span>›</span><b>' + activeSolution.title + '</b>');
   crumbs.innerHTML = parts.join(' ');
 }
@@ -1497,7 +1498,7 @@ function unfocusSolution() {
 /* ---- solution preview card ------------------------------------------------ */
 function selectSolution(b, sol) {
   activeSolution = sol;
-  previewKicker.textContent = 'Solution ' + String(sol.number).padStart(2, '0');
+  previewKicker.textContent = 'Level 3 · Mitigation Solutions · Solution ' + String(sol.number).padStart(2, '0');
   previewTitle.textContent = sol.title;
   previewCopy.textContent = sol.description || '';
   const clip = sol.animation && sol.animation.clip ? clips.find(c => c.name === sol.animation.clip) : null;
