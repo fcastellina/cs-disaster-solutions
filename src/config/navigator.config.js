@@ -48,7 +48,7 @@ export const CONFIG = {
     explore: "Explore solution ↗",
     provider: "Visit provider ↗",
     details: "Solution details ↗",
-    modalKicker: "Interactive solution model"
+    modalKicker: "Level 4 · Solution Explorer"
   },
 
   /* colours */
