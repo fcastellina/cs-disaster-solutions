@@ -8,7 +8,7 @@ export const CONFIG = {
 
   /* the 3D file */
   model: {
-    url: "/models/DPR_CITY.glb",   // sits next to this HTML file
+    url: "./models/DPR_CITY.glb",   // sits next to this HTML file
     terrainNode: "TERRAIN_MAIN"   // ground plane, shown at every level
   },
 
