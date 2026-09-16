@@ -18,10 +18,8 @@ export const dom = Object.freeze({
   solutionHotspots: getRequiredElement('solutionHotspots'),
 
   preview: getRequiredElement('preview'),
-  previewKicker: getRequiredElement('previewKicker'),
   previewTitle: getRequiredElement('previewTitle'),
   previewCopy: getRequiredElement('previewCopy'),
-  previewNote: getRequiredElement('previewNote'),
   previewClose: getRequiredElement('previewClose'),
 
   playBtn: getRequiredElement('playBtn'),
