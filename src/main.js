@@ -32,10 +32,8 @@ const {
   buildingHotspots,
   solutionHotspots,
   preview,
-  previewKicker,
   previewTitle,
   previewCopy,
-  previewNote,
   previewClose,
   playBtn,
   exploreBtn,
@@ -366,7 +364,7 @@ function applyText() {
   const t = CONFIG.text;
   uiTitle.textContent = t.title; uiSubtitle.textContent = t.subtitle;
   document.title = t.title.replace(/·/g, '-');
-  backBtn.textContent = t.back; exploreBtn.textContent = t.explore;
+  backBtn.textContent = t.backMap; exploreBtn.textContent = t.explore;
   providerLink.textContent = t.provider; detailsLink.textContent = t.details;
   viewerKicker.textContent = t.modalKicker;
   hint.textContent = level === 'city' ? t.hintCity : t.hintBuilding;
@@ -1217,6 +1215,7 @@ function goCity(animated = true) {
     }
   }
   backBtn.hidden = hazardAreaVisible;
+  backBtn.textContent = CONFIG.text.backMap;
   hint.textContent = CONFIG.text.hintCity; hint.style.opacity = '1';
   renderCrumbs(); say('City view. ' + CONFIG.text.hintCity + '.');
 }
@@ -1304,6 +1303,7 @@ function goBuilding(b, animated = true) {
     finishEnterBuilding();
   }
   backBtn.hidden = false;
+  backBtn.textContent = CONFIG.text.backCity;
   hint.textContent = 'Opening building'; hint.style.opacity = '1';
   renderCrumbs();
 }
@@ -1498,7 +1498,7 @@ function unfocusSolution() {
 /* ---- solution preview card ------------------------------------------------ */
 function selectSolution(b, sol) {
   activeSolution = sol;
-  previewKicker.textContent = 'Level 3 · Mitigation Solutions · Solution ' + String(sol.number).padStart(2, '0');
+  backBtn.textContent = CONFIG.text.backCity;
   previewTitle.textContent = sol.title;
   previewCopy.textContent = sol.description || '';
   const clip = sol.animation && sol.animation.clip ? clips.find(c => c.name === sol.animation.clip) : null;
@@ -1506,7 +1506,6 @@ function selectSolution(b, sol) {
   playBtn.disabled = !clip && !canPlaceholder;
   playBtn.title = sol.animation && sol.animation.label ? sol.animation.label : 'Play animation';
   playBtn.setAttribute('aria-label', playBtn.title);
-  previewNote.textContent = (!clip && canPlaceholder) ? CONFIG.animation.placeholderNote : '';
   preview.classList.add('visible');
   hint.style.opacity = '0';
   applySolutionGeometry(b, sol);
@@ -1530,6 +1529,7 @@ function hidePreview() {
   const building = activeBuilding;
   preview.classList.remove('visible'); activeSolution = null;
   if (level === 'building') {
+    backBtn.textContent = CONFIG.text.backCity;
     hint.textContent = CONFIG.text.hintBuilding; hint.style.opacity = '1';
     clearSolutionGeometry(building);
     unfocusSolution();

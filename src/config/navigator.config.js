@@ -44,7 +44,8 @@ export const CONFIG = {
     subtitle: "Select a location to explore a steel solution in context.",
     hintCity: "Select a building",
     hintBuilding: "Select a solution",
-    back: "← Back to city",
+    backMap: "← BACK TO MAP",
+    backCity: "← BACK TO CITY",
     explore: "Explore solution ↗",
     provider: "Visit provider ↗",
     details: "Solution details ↗",
@@ -188,8 +189,7 @@ export const CONFIG = {
 
   /* animation, placeholder runs until a clip is exported */
   animation: {
-    placeholder: "sway",   // 'sway' or 'off'
-    placeholderNote: "Placeholder movement. Export an animation clip from Blender and name it below to replace it."
+    placeholder: "sway"   // 'sway' or 'off'
   },
 
   /* the buildings, copy a block to add another one */
