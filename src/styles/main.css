@@ -55,7 +55,7 @@ canvas {
   z-index: 40;
   display: block;
   background: var(--paper);
-  transition: opacity 0.35s ease, visibility 0.35s ease;
+  transition: opacity 0.35s ease-out, visibility 0.35s ease-out;
 }
 .hazard-map.is-hidden {
   opacity: 0;
